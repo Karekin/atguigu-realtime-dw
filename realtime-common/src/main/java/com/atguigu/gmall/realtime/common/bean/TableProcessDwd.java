@@ -4,6 +4,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * TableProcessDwd 类，用于表示数据处理过程中的表配置。
+ * 包含源表名、源类型、目标表名、输出字段和操作类型等信息。
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

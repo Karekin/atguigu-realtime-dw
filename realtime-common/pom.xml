@@ -1,40 +1,56 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 定义XML文件的版本和编码 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <!-- 定义project元素及其命名空间和模式位置 -->
     <parent>
+        <!-- 定义父项目的artifactId，即父项目的唯一标识符 -->
         <artifactId>atguigu-realtime-dw</artifactId>
+        <!-- 定义父项目的groupId，即父项目所属的组织或公司 -->
         <groupId>com.atguigu</groupId>
+        <!-- 定义父项目的版本 -->
         <version>1.0-SNAPSHOT</version>
     </parent>
+    <!-- 定义模型版本，这里指定为4.0.0 -->
     <modelVersion>4.0.0</modelVersion>
 
+    <!-- 定义当前项目的artifactId -->
     <artifactId>realtime-common</artifactId>
 
     <properties>
+        <!-- 设置编译器的源代码版本 -->
         <maven.compiler.source>8</maven.compiler.source>
+        <!-- 设置编译器的目标代码版本 -->
         <maven.compiler.target>8</maven.compiler.target>
+        <!-- 设置项目构建时的源码文件编码 -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
+        <!-- 定义项目的依赖 -->
 
         <dependency>
+            <!-- 定义依赖的groupId -->
             <groupId>com.alibaba</groupId>
+            <!-- 定义依赖的artifactId -->
             <artifactId>fastjson</artifactId>
+            <!-- 可以在此处添加版本号，例如<version>1.2.73</version>，但此处省略了版本号 -->
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-kafka</artifactId>
+            <!-- Flink Kafka连接器依赖，用于与Kafka集成 -->
         </dependency>
 
         <dependency>
             <groupId>com.ververica</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
+            <!-- Flink MySQL CDC连接器依赖，用于从MySQL捕获数据变化 -->
         </dependency>
 
-        <!-- hbase 依赖-->
+        <!-- HBase依赖，用于与HBase集成 -->
         <dependency>
             <groupId>org.apache.hbase</groupId>
             <artifactId>hbase-client</artifactId>
@@ -43,34 +59,39 @@
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-hbase-2.2</artifactId>
+            <!-- Flink HBase连接器依赖 -->
         </dependency>
 
-        <!-- https://mvnrepository.com/artifact/org.apache.doris/flink-doris-connector-1.17 -->
+        <!-- Doris依赖，用于与Apache Doris集成 -->
         <dependency>
             <groupId>org.apache.doris</groupId>
             <artifactId>flink-doris-connector-1.17</artifactId>
+            <!-- 版本1.17的Flink Doris连接器依赖 -->
         </dependency>
 
         <dependency>
             <groupId>commons-beanutils</groupId>
             <artifactId>commons-beanutils</artifactId>
+            <!-- Commons BeanUtils依赖，用于操作Java Bean属性 -->
         </dependency>
 
         <dependency>
             <groupId>com.janeluo</groupId>
             <artifactId>ikanalyzer</artifactId>
+            <!-- IK分词器依赖，用于中文分词 -->
         </dependency>
 
         <dependency>
             <groupId>redis.clients</groupId>
             <artifactId>jedis</artifactId>
+            <!-- Jedis依赖，用于与Redis进行交互 -->
         </dependency>
 
         <dependency>
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>
+            <!-- Lettuce依赖，另一个用于与Redis进行交互的客户端 -->
         </dependency>
     </dependencies>
-
 
 </project>
