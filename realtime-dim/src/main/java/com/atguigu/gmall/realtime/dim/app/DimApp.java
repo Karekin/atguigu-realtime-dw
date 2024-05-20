@@ -32,6 +32,13 @@ import org.apache.hadoop.hbase.client.Connection;
 import java.io.IOException;
 import java.util.*;
 
+/**
+ * 这段代码实现了一个复杂的 Flink 应用程序，用于处理维度数据，并通过多种方式进行数据清洗、表管理和数据写入。
+     * 数据清洗：过滤和清洗原始数据，只保留符合条件的数据。
+     * 配置表读取：通过 Flink CDC 读取 MySQL 中的配置表数据。
+     * HBase 表管理：根据配置表数据在 HBase 中创建或删除表。
+     * 数据处理和写入：连接主数据流和广播流，处理数据并将结果写入 HBase。
+ */
 @Slf4j
 public class DimApp extends BaseApp {
     public static void main(String[] args) {
@@ -60,13 +67,11 @@ public class DimApp extends BaseApp {
     }
 
     private void writeToHBase(SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> resultStream) {
-    /*
-    1. 有没有专门的 HBase 连接器
-        没有
-    2. sql 有专门的 HBase 连接器, 由于一次只能写到一个表中, 所以也不能把流转成表再写
-
-    3. 自定义sink
-     */
+        /*
+        1. 没有专门的 HBase 连接器
+        2. SQL 有专门的 HBase 连接器, 由于一次只能写到一个表中, 所以也不能把流转成表再写
+        3. 自定义 sink
+        */
         resultStream.addSink(new HBaseSinkFunction());
     }
 
@@ -116,43 +121,47 @@ public class DimApp extends BaseApp {
     }
 
     private SingleOutputStreamOperator<TableProcessDim> readTableProcess(StreamExecutionEnvironment env) {
-        // useSSL=false
+        // 创建 Properties 对象，用于设置 MySQL 连接的属性
         Properties props = new Properties();
-        props.setProperty("useSSL", "false");
-        props.setProperty("allowPublicKeyRetrieval", "true");
+        props.setProperty("useSSL", "false"); // 禁用 SSL 连接
+        props.setProperty("allowPublicKeyRetrieval", "true"); // 允许公钥检索
+
+        // 创建 MySqlSource 对象，用于从 MySQL 中读取数据
         MySqlSource<String> mySqlSource = MySqlSource.<String>builder()
-                .hostname(Constant.MYSQL_HOST)
-                .port(Constant.MYSQL_PORT)
-                .databaseList("gmall2023_config") // set captured database, If you need to synchronize the whole database, Please set tableList to ".*".
-                .tableList("gmall2023_config.table_process_dim") // set captured table
-                .username(Constant.MYSQL_USER_NAME)
-                .password(Constant.MYSQL_PASSWORD)
-                .jdbcProperties(props)
-                .deserializer(new JsonDebeziumDeserializationSchema()) // converts SourceRecord to JSON String
-                .startupOptions(StartupOptions.initial()) // 默认值: initial  第一次启动读取所有数据(快照), 然后通过 binlog 实时监控变化数据
+                .hostname(Constant.MYSQL_HOST) // 设置 MySQL 主机地址
+                .port(Constant.MYSQL_PORT) // 设置 MySQL 端口号
+                .databaseList("gmall2023_config") // 设置要读取的数据库
+                .tableList("gmall2023_config.table_process_dim") // 设置要读取的表
+                .username(Constant.MYSQL_USER_NAME) // 设置 MySQL 用户名
+                .password(Constant.MYSQL_PASSWORD) // 设置 MySQL 密码
+                .jdbcProperties(props) // 设置 MySQL 连接属性
+                .deserializer(new JsonDebeziumDeserializationSchema()) // 设置反序列化器，将 SourceRecord 转换为 JSON 字符串
+                .startupOptions(StartupOptions.initial()) // 设置启动选项，初次启动时读取所有数据
                 .build();
 
+        // 使用创建的 MySqlSource 构建数据流
         return env
-                .fromSource(mySqlSource, WatermarkStrategy.noWatermarks(), "cdc-source")
-                .setParallelism(1) // 并行度设置为 1
+                .fromSource(mySqlSource, WatermarkStrategy.noWatermarks(), "cdc-source") // 从 MySqlSource 构建数据流
+                .setParallelism(1) // 设置并行度为 1
                 .map(new MapFunction<String, TableProcessDim>() {
                     @Override
                     public TableProcessDim map(String value) throws Exception {
-                        JSONObject obj = JSON.parseObject(value);
-                        String op = obj.getString("op");
+                        JSONObject obj = JSON.parseObject(value); // 将 JSON 字符串解析为 JSONObject 对象
+                        String op = obj.getString("op"); // 获取操作类型
                         TableProcessDim tableProcessDim;
-                        if ("d".equals(op)) {
-                            tableProcessDim = obj.getObject("before", TableProcessDim.class);
-                        } else {
-                            tableProcessDim = obj.getObject("after", TableProcessDim.class);
+                        if ("d".equals(op)) { // 如果操作类型是删除
+                            tableProcessDim = obj.getObject("before", TableProcessDim.class); // 获取删除前的数据
+                        } else { // 其他操作类型（插入或更新）
+                            tableProcessDim = obj.getObject("after", TableProcessDim.class); // 获取操作后的数据
                         }
-                        tableProcessDim.setOp(op);
+                        tableProcessDim.setOp(op); // 设置操作类型
 
-                        return tableProcessDim;
+                        return tableProcessDim; // 返回 TableProcessDim 对象
                     }
                 })
-                .setParallelism(1);
+                .setParallelism(1); // 设置并行度为 1
     }
+
 
     private SingleOutputStreamOperator<TableProcessDim> createHBaseTable(
             SingleOutputStreamOperator<TableProcessDim> tpStream) {
@@ -162,13 +171,13 @@ public class DimApp extends BaseApp {
 
                     @Override
                     public void open(Configuration parameters) throws Exception {
-                        // 1. 获取到 HBase 的连接
+                        // 获取 HBase 的连接
                         hbaseConn = HBaseUtil.getHBaseConnection();
                     }
 
                     @Override
                     public void close() throws Exception {
-                        // 2. 关闭连接
+                        // 关闭连接
                         HBaseUtil.closeHBaseConn(hbaseConn);
                     }
 
@@ -179,7 +188,7 @@ public class DimApp extends BaseApp {
                             dropTable(tableProcessDim);
                         } else if ("r".equals(op) || "c".equals(op)) {
                             createTable(tableProcessDim);
-                        } else { // u 应该先删除表,再建表. 表的历史数据需要重新同步
+                        } else {
                             dropTable(tableProcessDim);
                             createTable(tableProcessDim);
                         }
@@ -187,7 +196,6 @@ public class DimApp extends BaseApp {
                     }
 
                     private void createTable(TableProcessDim tableProcessDim) throws IOException {
-                        // namespace
                         HBaseUtil.createHBaseTable(hbaseConn,
                                 Constant.HBASE_NAMESPACE,
                                 tableProcessDim.getSinkTable(),
@@ -201,17 +209,15 @@ public class DimApp extends BaseApp {
                 .setParallelism(1);
     }
 
-
     private SingleOutputStreamOperator<Tuple2<JSONObject, TableProcessDim>> connect(
             SingleOutputStreamOperator<JSONObject> dataStream,
             SingleOutputStreamOperator<TableProcessDim> configStream) {
 
-        // 1. 把配置流做成广播流
-        // key: 表名   user_info
-        // value: TableProcess
-        MapStateDescriptor<String, TableProcessDim> mapStateDescriptor = new MapStateDescriptor<String, TableProcessDim>("table_process_dim", String.class, TableProcessDim.class);
+        // 将配置流转换为广播流
+        MapStateDescriptor<String, TableProcessDim> mapStateDescriptor = new MapStateDescriptor<>("table_process_dim", String.class, TableProcessDim.class);
         BroadcastStream<TableProcessDim> broadcastStream = configStream.broadcast(mapStateDescriptor);
-        // 2. 数据流去 connect 广播流
+
+        // 数据流连接广播流
         return dataStream
                 .connect(broadcastStream)
                 .process(new BroadcastProcessFunction<JSONObject, TableProcessDim, Tuple2<JSONObject, TableProcessDim>>() {
@@ -220,9 +226,8 @@ public class DimApp extends BaseApp {
 
                     @Override
                     public void open(Configuration parameters) throws Exception {
-                        // open 中没有办法访问状态!!!
+                        // 初始化 map 并从 MySQL 中查询 table_process 表所有数据
                         map = new HashMap<>();
-                        // 1. 去 mysql 中查询 table_process 表所有数据
                         java.sql.Connection mysqlConn = JdbcUtil.getMysqlConnection();
                         List<TableProcessDim> tableProcessDimList = JdbcUtil.queryList(mysqlConn,
                                 "select * from gmall2023_config.table_process_dim",
@@ -237,7 +242,7 @@ public class DimApp extends BaseApp {
                         JdbcUtil.closeConnection(mysqlConn);
                     }
 
-                    // 2. 处理广播流中的数据: 把配置信息存入到广播状态中
+                    // 处理广播流中的数据: 将配置信息存入广播状态中
                     @Override
                     public void processBroadcastElement(TableProcessDim tableProcessDim,
                                                         Context context,
@@ -246,17 +251,14 @@ public class DimApp extends BaseApp {
                         String key = tableProcessDim.getSourceTable();
 
                         if ("d".equals(tableProcessDim.getOp())) {
-                            // 删除状态
                             state.remove(key);
-                            // map中的配置也要删除
                             map.remove(key);
                         } else {
-                            // 更新或者添加状态
                             state.put(key, tableProcessDim);
                         }
                     }
 
-                    // 3. 处理数据流中的数据: 从广播状态中读取配置信息
+                    // 处理数据流中的数据: 从广播状态中读取配置信息
                     @Override
                     public void processElement(JSONObject jsonObj,
                                                ReadOnlyContext context,
@@ -265,7 +267,7 @@ public class DimApp extends BaseApp {
                         String key = jsonObj.getString("table");
                         TableProcessDim tableProcessDim = state.get(key);
 
-                        if (tableProcessDim == null) {  // 如果状态中没有查到, 则去 map 中查找
+                        if (tableProcessDim == null) {
                             tableProcessDim = map.get(key);
                             if (tableProcessDim != null) {
                                 log.info("在 map 中查找到 " + key);
@@ -273,14 +275,12 @@ public class DimApp extends BaseApp {
                         } else {
                             log.info("在 状态 中查找到 " + key);
                         }
-                        if (tableProcessDim != null) { // 这条数据找到了对应的配置信息
+                        if (tableProcessDim != null) {
                             JSONObject data = jsonObj.getJSONObject("data");
-                            data.put("op_type", jsonObj.getString("type"));  // 后期需要
+                            data.put("op_type", jsonObj.getString("type"));
                             out.collect(Tuple2.of(data, tableProcessDim));
                         }
                     }
                 });
     }
-
-
 }
