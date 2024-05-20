@@ -30,28 +30,35 @@ import java.time.Duration;
 import java.util.HashSet;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中订单数据的实时处理，
+ * 包括数据过滤、去重、字段提取、多表关联和结果写入 Doris 数据库。通过这种方式，
+ * 可以高效地统计每个省份的订单数据，为后续的数据分析和处理提供支持。
+ */
 public class DwsTradeProvinceOrderWindow extends BaseApp {
+    // 主方法，程序入口
     public static void main(String[] args) {
         new DwsTradeProvinceOrderWindow().start(
-                10020,
-                4,
-                "dws_trade_province_order_window",
-                Constant.TOPIC_DWD_TRADE_ORDER_DETAIL
+                10020,  // 应用程序的端口号
+                4,      // 并行度
+                "dws_trade_province_order_window",  // 应用程序名称
+                Constant.TOPIC_DWD_TRADE_ORDER_DETAIL  // Kafka 主题名称
         );
     }
 
     @Override
-    public void handle(StreamExecutionEnvironment env,
-                       DataStreamSource<String> stream) {
+    public void handle(StreamExecutionEnvironment env, DataStreamSource<String> stream) {
         SingleOutputStreamOperator<TradeProvinceOrderBean> reducedStream = stream
                 .map(new MapFunction<String, TradeProvinceOrderBean>() {
                     @Override
                     public TradeProvinceOrderBean map(String value) throws Exception {
                         JSONObject obj = JSON.parseObject(value);
 
+                        // 将订单 ID 放入集合中，用于后续的去重
                         HashSet<String> set = new HashSet<>();
                         set.add(obj.getString("order_id"));
 
+                        // 创建并返回 TradeProvinceOrderBean 对象
                         return TradeProvinceOrderBean.builder()
                                 .orderDetailId(obj.getString("id"))
                                 .orderAmount(obj.getBigDecimal("split_total_amount"))
@@ -62,22 +69,23 @@ public class DwsTradeProvinceOrderWindow extends BaseApp {
                     }
 
                 })
-                .keyBy(TradeProvinceOrderBean::getOrderDetailId)  // 按照详情 id 去重
+                .keyBy(TradeProvinceOrderBean::getOrderDetailId)  // 按照详情 id 进行分区
                 .process(new KeyedProcessFunction<String, TradeProvinceOrderBean, TradeProvinceOrderBean>() {
 
+                    // 定义状态变量，用于存储是否是第一次处理该订单详情
                     private ValueState<Boolean> isFirstState;
 
                     @Override
-                    public void open(Configuration parameters) throws Exception {
-                        isFirstState = getRuntimeContext().getState(new ValueStateDescriptor<Boolean>("isFirst", Boolean.class));
-                        // 一定给状态添加 ttl 省略
+                    public void open(Configuration parameters) {
+                        // 初始化状态变量
+                        isFirstState = getRuntimeContext().getState(new ValueStateDescriptor<>("isFirst", Boolean.class));
                     }
 
                     @Override
                     public void processElement(TradeProvinceOrderBean value,
                                                Context ctx,
                                                Collector<TradeProvinceOrderBean> out) throws Exception {
-                        // 因为后期需要聚合的数据都在左表, 所以,可以只去当前详情 id 的第一条数据即可
+                        // 仅处理第一次出现的订单详情
                         if (isFirstState.value() == null) {
                             isFirstState.update(true);
                             out.collect(value);
@@ -86,17 +94,18 @@ public class DwsTradeProvinceOrderWindow extends BaseApp {
                 })
                 .assignTimestampsAndWatermarks(
                         WatermarkStrategy
-                                .<TradeProvinceOrderBean>forBoundedOutOfOrderness(Duration.ofSeconds(5L))
-                                .withTimestampAssigner((bean, ts) -> bean.getTs())
-                                .withIdleness(Duration.ofSeconds(120L))
+                                .<TradeProvinceOrderBean>forBoundedOutOfOrderness(Duration.ofSeconds(5L))  // 允许 5 秒的延迟
+                                .withTimestampAssigner((bean, ts) -> bean.getTs())  // 提取时间戳
+                                .withIdleness(Duration.ofSeconds(120L))  // 设置空闲超时时间为 120 秒
                 )
-                .keyBy(TradeProvinceOrderBean::getProvinceId) // 分组开窗聚合
-                .window(TumblingEventTimeWindows.of(Time.seconds(5L)))
+                .keyBy(TradeProvinceOrderBean::getProvinceId)  // 按照省份 ID 进行分区
+                .window(TumblingEventTimeWindows.of(Time.seconds(5L)))  // 按照 5 秒的滚动窗口进行聚合
                 .reduce(
                         new ReduceFunction<TradeProvinceOrderBean>() {
                             @Override
                             public TradeProvinceOrderBean reduce(TradeProvinceOrderBean value1,
-                                                                 TradeProvinceOrderBean value2) throws Exception {
+                                                                 TradeProvinceOrderBean value2) {
+                                // 聚合函数，将两个 TradeProvinceOrderBean 对象的订单金额和订单 ID 集合合并
                                 value1.setOrderAmount(value1.getOrderAmount().add(value2.getOrderAmount()));
                                 value1.getOrderIdSet().addAll(value2.getOrderIdSet());
                                 return value1;
@@ -107,7 +116,8 @@ public class DwsTradeProvinceOrderWindow extends BaseApp {
                             public void process(String provinceId,
                                                 Context ctx,
                                                 Iterable<TradeProvinceOrderBean> elements,
-                                                Collector<TradeProvinceOrderBean> out) throws Exception {
+                                                Collector<TradeProvinceOrderBean> out) {
+                                // 处理窗口结果，设置窗口的开始时间、结束时间和当前日期
                                 TradeProvinceOrderBean bean = elements.iterator().next();
 
                                 bean.setStt(DateFormatUtil.tsToDateTime(ctx.window().getStart()));
@@ -120,8 +130,9 @@ public class DwsTradeProvinceOrderWindow extends BaseApp {
                         }
                 );
 
+        // 异步方式补充维度信息
         AsyncDataStream
-                .unorderedWait(  // 异步的方式补充维度
+                .unorderedWait(
                         reducedStream,
                         new AsyncDimFunction<TradeProvinceOrderBean>() {
                             @Override
@@ -135,17 +146,14 @@ public class DwsTradeProvinceOrderWindow extends BaseApp {
                             }
 
                             @Override
-                            public void addDims(TradeProvinceOrderBean bean,
-                                                JSONObject dim) {
+                            public void addDims(TradeProvinceOrderBean bean, JSONObject dim) {
                                 bean.setProvinceName(dim.getString("name"));
                             }
                         },
                         120,
                         TimeUnit.SECONDS
                 )
-                .map(new DorisMapFunction<>())
-                .sinkTo(FlinkSinkUtil.getDorisSink(Constant.DORIS_DATABASE + ".dws_trade_province_order_window", "dws_trade_province_order_window"));
-
-
+                .map(new DorisMapFunction<>())  // 将数据映射到 Doris 数据库格式
+                .sinkTo(FlinkSinkUtil.getDorisSink(Constant.DORIS_DATABASE + ".dws_trade_province_order_window", "dws_trade_province_order_window"));  // 将结果写入 Doris 数据库
     }
 }

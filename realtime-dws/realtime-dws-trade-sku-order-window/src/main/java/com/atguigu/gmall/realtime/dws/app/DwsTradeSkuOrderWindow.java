@@ -31,6 +31,11 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中订单数据的实时处理，
+ * 包括数据解析、去重、字段提取、多表关联和结果写入 Doris 数据库。通过这种方式，
+ * 可以高效地统计每个 SKU 的订单数据，为后续的数据分析和处理提供支持。
+ */
 public class DwsTradeSkuOrderWindow extends BaseApp {
     public static void main(String[] args) {
         new DwsTradeSkuOrderWindow().start(
