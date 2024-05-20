@@ -9,26 +9,34 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 import java.time.Duration;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中订单退款数据的实时处理，
+ * 包括数据过滤、字段提取、多表关联和结果写入 Kafka。通过这种方式，
+ * 可以高效地处理和管理订单退款数据，为后续的数据分析和处理提供支持。
+ */
 public class DwdTradeOrderRefund extends BaseSQLApp {
+
+    // 主方法，程序入口
     public static void main(String[] args) {
         new DwdTradeOrderRefund().start(
-                10017,
-                4,
-                Constant.TOPIC_DWD_TRADE_ORDER_REFUND
+                10017,  // 应用程序的端口号
+                4,      // 并行度
+                Constant.TOPIC_DWD_TRADE_ORDER_REFUND  // Kafka 主题名称
         );
-
     }
 
     @Override
-    public void handle(StreamExecutionEnvironment env,
-                       StreamTableEnvironment tEnv) {
+    public void handle(StreamExecutionEnvironment env, StreamTableEnvironment tEnv) {
+        // 设置空闲状态保留时间为 5 秒
         tEnv.getConfig().setIdleStateRetention(Duration.ofSeconds(5));
-        // 1.1 读取 topic_db
+
+        // 1. 从 Kafka 主题中读取数据，建立动态表
         readOdsDb(tEnv, Constant.TOPIC_DWD_TRADE_ORDER_REFUND);
-        // 1.2 读取 字典表
+
+        // 2. 读取字典表数据
         readBaseDic(tEnv);
 
-        // 2. 过滤退单表数据 order_refund_info   insert
+        // 3. 过滤订单退款信息数据
         Table orderRefundInfo = tEnv.sqlQuery(
                 "select " +
                         "data['id'] id," +
@@ -49,7 +57,7 @@ public class DwdTradeOrderRefund extends BaseSQLApp {
                         "and `type`='insert' ");
         tEnv.createTemporaryView("order_refund_info", orderRefundInfo);
 
-        // 3. 过滤订单表中的退单数据: order_info  update
+        // 4. 过滤订单表中的退单数据
         Table orderInfo = tEnv.sqlQuery(
                 "select " +
                         "data['id'] id," +
@@ -60,10 +68,10 @@ public class DwdTradeOrderRefund extends BaseSQLApp {
                         "and `table`='order_info' " +
                         "and `type`='update'" +
                         "and `old`['order_status'] is not null " +
-                        "and `data`['order_status']='1005' ");
+                        "and `data`['order_status']='1005' ");  // 状态为已退款
         tEnv.createTemporaryView("order_info", orderInfo);
 
-        // 4. join: 普通的和 lookup join
+        // 5. 关联退款信息表和订单表，并与字典表进行关联
         Table result = tEnv.sqlQuery(
                 "select " +
                         "ri.id," +
@@ -74,9 +82,9 @@ public class DwdTradeOrderRefund extends BaseSQLApp {
                         "date_format(ri.create_time,'yyyy-MM-dd') date_id," +
                         "ri.create_time," +
                         "ri.refund_type," +
-                        "dic1.info.dic_name," +
+                        "dic1.info.dic_name as refund_type_name," +
                         "ri.refund_reason_type," +
-                        "dic2.info.dic_name," +
+                        "dic2.info.dic_name as refund_reason_type_name," +
                         "ri.refund_reason_txt," +
                         "ri.refund_num," +
                         "ri.refund_amount," +
@@ -89,7 +97,7 @@ public class DwdTradeOrderRefund extends BaseSQLApp {
                         "join base_dic for system_time as of ri.pt as dic2 " +
                         "on ri.refund_reason_type=dic2.dic_code ");
 
-        // 5. 写出到 kafka
+        // 6. 将结果数据写出到 Kafka
         tEnv.executeSql(
                 "create table dwd_trade_order_refund(" +
                         "id string," +
@@ -109,8 +117,7 @@ public class DwdTradeOrderRefund extends BaseSQLApp {
                         "ts bigint " +
                         ")" + SQLUtil.getKafkaDDLSink(Constant.TOPIC_DWD_TRADE_ORDER_REFUND));
 
+        // 执行插入操作，将结果数据写入 Kafka 主题
         result.executeInsert(Constant.TOPIC_DWD_TRADE_ORDER_REFUND);
-
-
     }
 }

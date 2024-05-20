@@ -9,24 +9,31 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 import java.time.Duration;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中订单取消数据的实时处理，
+ * 包括数据过滤、字段提取、Join 操作和结果写入 Kafka。通过这种方式，
+ * 可以高效地处理和管理订单取消数据，为后续的数据分析和处理提供支持。
+ */
 public class DwdTradeOrderCancelDetail extends BaseSQLApp {
+
+    // 主方法，程序入口
     public static void main(String[] args) {
         new DwdTradeOrderCancelDetail().start(
-                10015,
-                4,
-                Constant.TOPIC_DWD_TRADE_ORDER_CANCEL
+                10015,  // 应用程序的端口号
+                4,      // 并行度
+                Constant.TOPIC_DWD_TRADE_ORDER_CANCEL  // Kafka 主题名称
         );
-
     }
 
     @Override
-    public void handle(StreamExecutionEnvironment env,
-                       StreamTableEnvironment tEnv) {
+    public void handle(StreamExecutionEnvironment env, StreamTableEnvironment tEnv) {
+        // 设置空闲状态保留时间为30分钟零5秒
         tEnv.getConfig().setIdleStateRetention(Duration.ofSeconds(30 * 60 + 5));
 
-        // 1. 读取 topic_db 数据
+        // 1. 从 Kafka 主题中读取数据，建立动态表
         readOdsDb(tEnv, Constant.TOPIC_DWD_TRADE_ORDER_CANCEL);
-        // 2. 读取 dwd 层下单事务事实表数据
+
+        // 2. 读取 DWD 层的下单事务事实表数据
         tEnv.executeSql(
                 "create table dwd_trade_order_detail(" +
                         "id string," +
@@ -59,6 +66,7 @@ public class DwdTradeOrderCancelDetail extends BaseSQLApp {
                 "and `type`='update' " +
                 "and `old`['order_status']='1001' " +
                 "and `data`['order_status']='1003' ");
+        // 创建临时视图
         tEnv.createTemporaryView("order_cancel", orderCancel);
 
         // 4. 订单取消表和下单表进行 join
@@ -85,7 +93,7 @@ public class DwdTradeOrderCancelDetail extends BaseSQLApp {
                         "join order_cancel oc " +
                         "on od.order_id=oc.id ");
 
-        // 5. 写出
+        // 5. 写出结果到 Kafka
         tEnv.executeSql(
                 "create table dwd_trade_order_cancel_detail(" +
                         "id string," +
@@ -107,6 +115,7 @@ public class DwdTradeOrderCancelDetail extends BaseSQLApp {
                         "ts bigint " +
                         ")" + SQLUtil.getKafkaDDLSink(Constant.TOPIC_DWD_TRADE_ORDER_CANCEL));
 
+        // 执行插入操作，将结果数据写入 Kafka 主题
         result.executeInsert(Constant.TOPIC_DWD_TRADE_ORDER_CANCEL);
     }
 }

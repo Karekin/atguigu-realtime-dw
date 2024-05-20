@@ -9,26 +9,31 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 import java.time.Duration;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中订单详情数据的实时处理，
+ * 包括数据过滤、字段提取、多表关联和结果写入 Kafka。通过这种方式，
+ * 可以高效地处理和管理订单详情数据，为后续的数据分析和处理提供支持。
+ */
 public class DwdTradeOrderDetail extends BaseSQLApp {
+
+    // 主方法，程序入口
     public static void main(String[] args) {
         new DwdTradeOrderDetail().start(
-                10014,
-                4,
-                Constant.TOPIC_DWD_TRADE_ORDER_DETAIL
+                10014,  // 应用程序的端口号
+                4,      // 并行度
+                Constant.TOPIC_DWD_TRADE_ORDER_DETAIL  // Kafka 主题名称
         );
-
     }
 
     @Override
-    public void handle(StreamExecutionEnvironment env,
-                       StreamTableEnvironment tEnv) {
-        // 因为有 join: 默认所有表的数据都会一致存储到内存中. 所以要加 ttl
+    public void handle(StreamExecutionEnvironment env, StreamTableEnvironment tEnv) {
+        // 因为有 join 操作，默认所有表的数据都会一致存储到内存中，所以要设置空闲状态保留时间为 5 秒
         tEnv.getConfig().setIdleStateRetention(Duration.ofSeconds(5));
 
-        // 1. 读取 topic_db
+        // 1. 从 Kafka 主题中读取数据，建立动态表
         readOdsDb(tEnv, Constant.TOPIC_DWD_TRADE_ORDER_DETAIL);
 
-        // 2. 过滤出 order_detail 数据: insert
+        // 2. 过滤出 order_detail 数据，操作类型为 insert
         Table orderDetail = tEnv.sqlQuery(
                 "select " +
                         "data['id'] id," +
@@ -51,7 +56,7 @@ public class DwdTradeOrderDetail extends BaseSQLApp {
                         "and `type`='insert' ");
         tEnv.createTemporaryView("order_detail", orderDetail);
 
-        // 3. 过滤出 oder_info 数据: insert
+        // 3. 过滤出 order_info 数据，操作类型为 insert
         Table orderInfo = tEnv.sqlQuery(
                 "select " +
                         "data['id'] id," +
@@ -63,7 +68,7 @@ public class DwdTradeOrderDetail extends BaseSQLApp {
                         "and `type`='insert' ");
         tEnv.createTemporaryView("order_info", orderInfo);
 
-        // 4. 过滤order_detail_activity 表: insert
+        // 4. 过滤出 order_detail_activity 数据，操作类型为 insert
         Table orderDetailActivity = tEnv.sqlQuery(
                 "select " +
                         "data['order_detail_id'] order_detail_id, " +
@@ -75,7 +80,7 @@ public class DwdTradeOrderDetail extends BaseSQLApp {
                         "and `type`='insert' ");
         tEnv.createTemporaryView("order_detail_activity", orderDetailActivity);
 
-        // 5. 过滤order_detail_coupon 表: insert
+        // 5. 过滤出 order_detail_coupon 数据，操作类型为 insert
         Table orderDetailCoupon = tEnv.sqlQuery(
                 "select " +
                         "data['order_detail_id'] order_detail_id, " +
@@ -85,9 +90,8 @@ public class DwdTradeOrderDetail extends BaseSQLApp {
                         "and `table`='order_detail_coupon' " +
                         "and `type`='insert' ");
         tEnv.createTemporaryView("order_detail_coupon", orderDetailCoupon);
-        //orderDetailCoupon.execute().print();
 
-        // 6. 四张表 join:
+        // 6. 将四张表进行 join 操作
         Table result = tEnv.sqlQuery(
                 "select " +
                         "od.id," +
@@ -114,7 +118,7 @@ public class DwdTradeOrderDetail extends BaseSQLApp {
                         "left join order_detail_coupon cou " +
                         "on od.id=cou.order_detail_id ");
 
-        // 7. 写出到 kafka 中
+        // 7. 将结果数据写出到 Kafka
         tEnv.executeSql(
                 "create table dwd_trade_order_detail(" +
                         "id string," +
@@ -137,6 +141,7 @@ public class DwdTradeOrderDetail extends BaseSQLApp {
                         "primary key(id) not enforced " +
                         ")" + SQLUtil.getUpsertKafkaDDL(Constant.TOPIC_DWD_TRADE_ORDER_DETAIL));
 
+        // 执行插入操作，将结果数据写入 Kafka 主题
         result.executeInsert(Constant.TOPIC_DWD_TRADE_ORDER_DETAIL);
     }
 }

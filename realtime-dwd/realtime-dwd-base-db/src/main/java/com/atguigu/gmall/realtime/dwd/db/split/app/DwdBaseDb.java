@@ -28,6 +28,15 @@ import org.apache.flink.util.Collector;
 
 import java.util.*;
 
+/**
+ * 这段代码实现了一个 Flink 应用程序，用于实时处理数据库中的数据变更，
+ * 并根据配置表的信息，将处理后的数据写入到 Kafka 中。代码主要包括以下几个步骤：
+     * 数据清洗（ETL）
+     * 读取配置表数据
+     * 将数据流与配置流连接
+     * 删除不需要的字段
+     * 将处理后的数据写入 Kafka
+ */
 @Slf4j
 public class DwdBaseDb extends BaseApp {
     public static void main(String[] args) {

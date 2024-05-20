@@ -9,26 +9,34 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
 import java.time.Duration;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中退款支付成功数据的实时处理，
+ * 包括数据过滤、字段提取、多表关联和结果写入 Kafka。通过这种方式，
+ * 可以高效地处理和管理退款支付成功数据，为后续的数据分析和处理提供支持。
+ */
 public class DwdTradeRefundPaySucDetail extends BaseSQLApp {
+
+    // 主方法，程序入口
     public static void main(String[] args) {
         new DwdTradeRefundPaySucDetail().start(
-                10018,
-                4,
-                Constant.TOPIC_DWD_TRADE_REFUND_PAYMENT_SUCCESS
+                10018,  // 应用程序的端口号
+                4,      // 并行度
+                Constant.TOPIC_DWD_TRADE_REFUND_PAYMENT_SUCCESS  // Kafka 主题名称
         );
     }
 
     @Override
-    public void handle(StreamExecutionEnvironment env,
-                       StreamTableEnvironment tEnv) {
+    public void handle(StreamExecutionEnvironment env, StreamTableEnvironment tEnv) {
+        // 设置空闲状态保留时间为 5 秒
         tEnv.getConfig().setIdleStateRetention(Duration.ofSeconds(5));
 
-        // 1. 读取 topic_db
+        // 1. 从 Kafka 主题中读取数据，建立动态表
         readOdsDb(tEnv, Constant.TOPIC_DWD_TRADE_REFUND_PAYMENT_SUCCESS);
-        // 2. 读取 字典表
+
+        // 2. 读取字典表数据
         readBaseDic(tEnv);
 
-        // 3. 过滤退款成功表数据
+        // 3. 过滤退款支付成功表数据
         Table refundPayment = tEnv.sqlQuery(
                 "select " +
                         "data['id'] id," +
@@ -47,7 +55,7 @@ public class DwdTradeRefundPaySucDetail extends BaseSQLApp {
                         "and `data`['refund_status']='1602'");
         tEnv.createTemporaryView("refund_payment", refundPayment);
 
-        // 4. 过滤退单表中的退单成功的数据
+        // 4. 过滤退单表中的退款成功的数据
         Table orderRefundInfo = tEnv.sqlQuery(
                 "select " +
                         "data['order_id'] order_id," +
@@ -75,7 +83,7 @@ public class DwdTradeRefundPaySucDetail extends BaseSQLApp {
                         "and `data`['order_status']='1006'");
         tEnv.createTemporaryView("order_info", orderInfo);
 
-        // 6. 4 张表的 join
+        // 6. 将四张表进行 join 操作
         Table result = tEnv.sqlQuery(
                 "select " +
                         "rp.id," +
@@ -88,7 +96,7 @@ public class DwdTradeRefundPaySucDetail extends BaseSQLApp {
                         "date_format(rp.callback_time,'yyyy-MM-dd') date_id," +
                         "rp.callback_time," +
                         "ori.refund_num," +
-                        "rp.total_amount," +
+                        "rp.total_amount as refund_amount," +
                         "rp.ts " +
                         "from refund_payment rp " +
                         "join order_refund_info ori " +
@@ -98,7 +106,7 @@ public class DwdTradeRefundPaySucDetail extends BaseSQLApp {
                         "join base_dic for system_time as of rp.pt as dic " +
                         "on rp.payment_type=dic.dic_code ");
 
-        // 7.写出到 kafka
+        // 7. 将结果数据写出到 Kafka
         tEnv.executeSql("create table dwd_trade_refund_pay_suc_detail(" +
                 "id string," +
                 "user_id string," +
@@ -113,8 +121,8 @@ public class DwdTradeRefundPaySucDetail extends BaseSQLApp {
                 "refund_amount string," +
                 "ts bigint " +
                 ")" + SQLUtil.getKafkaDDLSink(Constant.TOPIC_DWD_TRADE_REFUND_PAYMENT_SUCCESS));
+
+        // 执行插入操作，将结果数据写入 Kafka 主题
         result.executeInsert(Constant.TOPIC_DWD_TRADE_REFUND_PAYMENT_SUCCESS);
-
-
     }
 }

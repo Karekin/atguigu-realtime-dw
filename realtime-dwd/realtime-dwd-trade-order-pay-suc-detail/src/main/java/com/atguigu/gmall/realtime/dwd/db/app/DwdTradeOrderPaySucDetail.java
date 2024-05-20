@@ -7,18 +7,24 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 
+/**
+ * 这段代码通过 Flink 实现了对 Kafka 主题中订单支付成功数据的实时处理，
+ * 包括数据过滤、字段提取、多表关联和结果写入 Kafka。通过这种方式，
+ * 可以高效地处理和管理订单支付成功数据，为后续的数据分析和处理提供支持。
+ */
 public class DwdTradeOrderPaySucDetail extends BaseSQLApp {
+
+    // 主方法，程序入口
     public static void main(String[] args) {
         new DwdTradeOrderPaySucDetail().start(
-                10016,
-                4,
-                Constant.TOPIC_DWD_TRADE_ORDER_PAYMENT_SUCCESS
+                10016,  // 应用程序的端口号
+                4,      // 并行度
+                Constant.TOPIC_DWD_TRADE_ORDER_PAYMENT_SUCCESS  // Kafka 主题名称
         );
     }
 
     @Override
-    public void handle(StreamExecutionEnvironment env,
-                       StreamTableEnvironment tEnv) {
+    public void handle(StreamExecutionEnvironment env, StreamTableEnvironment tEnv) {
         // 1. 读取下单事务事实表
         tEnv.executeSql(
                 "create table dwd_trade_order_detail(" +
@@ -39,17 +45,17 @@ public class DwdTradeOrderPaySucDetail extends BaseSQLApp {
                         "split_coupon_amount string," +
                         "split_total_amount string," +
                         "ts bigint," +
-                        "et as to_timestamp_ltz(ts, 0), " +
-                        "watermark for et as et - interval '3' second " +
+                        "et as to_timestamp_ltz(ts, 0), " +  // 事件时间
+                        "watermark for et as et - interval '3' second " +  // 水印
                         ")" + SQLUtil.getKafkaDDLSource(Constant.TOPIC_DWD_TRADE_ORDER_PAYMENT_SUCCESS, Constant.TOPIC_DWD_TRADE_ORDER_DETAIL));
 
-        // 2. 读取 topic_db
+        // 2. 读取 Kafka 数据
         readOdsDb(tEnv, Constant.TOPIC_DWD_TRADE_ORDER_PAYMENT_SUCCESS);
 
-        // 3. 读取 字典表
+        // 3. 读取字典表
         readBaseDic(tEnv);
 
-        // 4. 从 topic_db 中过滤 payment_info
+        // 4. 从 Kafka 主题中过滤支付信息
         Table paymentInfo = tEnv.sqlQuery("select " +
                 "data['user_id'] user_id," +
                 "data['order_id'] order_id," +
@@ -63,10 +69,10 @@ public class DwdTradeOrderPaySucDetail extends BaseSQLApp {
                 "and `table`='payment_info' " +
                 "and `type`='update' " +
                 "and `old`['payment_status'] is not null " +
-                "and `data`['payment_status']='1602' ");
+                "and `data`['payment_status']='1602' ");  // 支付成功的订单
         tEnv.createTemporaryView("payment_info", paymentInfo);
 
-        // 5. 3张join: interval join 无需设置 ttl
+        // 5. 进行多表关联 (Interval Join)
         Table result = tEnv.sqlQuery(
                 "select " +
                         "od.id order_detail_id," +
@@ -90,12 +96,12 @@ public class DwdTradeOrderPaySucDetail extends BaseSQLApp {
                         "from payment_info pi " +
                         "join dwd_trade_order_detail od " +
                         "on pi.order_id=od.order_id " +
-                        "and od.et >= pi.et - interval '30' minute " +
-                        "and od.et <= pi.et + interval '5' second " +
-                        "join base_dic for system_time as of pi.pt as dic " +
+                        "and od.et >= pi.et - interval '30' minute " +  // 关联条件，支付成功时间与订单创建时间在30分钟内
+                        "and od.et <= pi.et + interval '5' second " +  // 关联条件，支付成功时间与订单创建时间在5秒内
+                        "join base_dic for system_time as of pi.pt as dic " +  // 系统时间关联字典表
                         "on pi.payment_type=dic.dic_code ");
 
-        // 6. 写出到 kafka 中
+        // 6. 将结果数据写出到 Kafka
         tEnv.executeSql("create table dwd_trade_order_pay_suc_detail(" +
                 "order_detail_id string," +
                 "order_id string," +
